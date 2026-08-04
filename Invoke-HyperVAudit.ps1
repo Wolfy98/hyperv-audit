@@ -1,4 +1,4 @@
-<#
+﻿<#
 ================================================================================
   Invoke-HyperVAudit.ps1  ·  v2.0
   Hyper-V / Failover-Cluster inventory & health assessment  --  READ ONLY
@@ -151,7 +151,10 @@ if ($cluster) {
     Safe {
         $cn = Get-ClusterNode
         $cn | Select-Object Name,State,NodeWeight | Format-Table -AutoSize
-        $nodes = ($cn | Where-Object State -eq 'Up').Name
+        # $script: is required - a plain assignment inside this scriptblock would
+        # create a local copy and the cluster-wide loops would silently audit
+        # only the launching node (latent bug found by PSScriptAnalyzer).
+        $script:nodes = @(($cn | Where-Object State -eq 'Up').Name)
         foreach ($n in ($cn | Where-Object State -ne 'Up')) {
             Add-Flag HIGH $n.Name "Cluster node is $($n.State) (not Up)." `
                 -Why "A down node means reduced failover capacity right now - and if it went down unnoticed, monitoring has a gap." `
