@@ -1,9 +1,8 @@
-﻿<#
+<#
 ================================================================================
-  Invoke-HyperVAudit.ps1  ·  v2.0
+  Invoke-HyperVAudit.ps1·  v2.0
   Hyper-V / Failover-Cluster inventory & health assessment  --  READ ONLY
-  https://github.com/kythel/hyperv-audit  ·  built by KYTHEL (kythel.com)
-================================================================================
+  ================================================================================
 
   WHAT IT DOES
     Maps a Hyper-V host (or an entire failover cluster) end to end: hosts,
@@ -19,7 +18,7 @@
     anti-affinity in clusters).
 
     v2.0 adds a self-contained HTML report: every finding is explained in
-    three parts — WHAT WE SAW, WHY IT MATTERS, WHAT TO DO — so the report
+    three parts â€” WHAT WE SAW, WHY IT MATTERS, WHAT TO DO â€” so the report
     reads like an engineer's write-up, not a wall of raw data.
 
   SAFETY  --  THIS SCRIPT DOES NOT CHANGE ANYTHING
@@ -85,7 +84,7 @@ function Section { param([string]$Title)
 function Safe { param([scriptblock]$Block,[string]$Label)
     try { & $Block } catch { Write-Host ("  [skip] {0}: {1}" -f $Label, $_.Exception.Message) -ForegroundColor DarkYellow } }
 
-Write-Host ("KYTHEL Hyper-V Audit v2.0  |  Host: {0}  |  {1}" -f $env:COMPUTERNAME, (Get-Date)) -ForegroundColor Green
+Write-Host ("BW Hyper-V Audit v2.0  |  Host: {0}  |  {1}" -f $env:COMPUTERNAME, (Get-Date)) -ForegroundColor Green
 Write-Host  "READ-ONLY: this script inspects only; it changes nothing." -ForegroundColor Green
 if (-not $NoTranscript) { Write-Host ("Transcript: {0}" -f $logFile) -ForegroundColor DarkGray }
 
@@ -651,19 +650,51 @@ Write-Host "  A config version well below the host's maximum = upgrade candidate
 
 # -------------------------------------- VM security posture ---
 Section "VIRTUAL MACHINES - SECURITY (Gen 2: Secure Boot / vTPM)"
+
 foreach ($n in $nodes) {
     Safe {
-        $vms = if ($n -eq $env:COMPUTERNAME) { Get-VM } else { Get-VM -ComputerName $n }
-        $rows = foreach ($vm in ($vms | Where-Object Generation -eq 2)) {
-            $sec = $vm | Get-VMSecurity
-            if ($sec -and -not $sec.SecureBootEnabled) {
-                Add-Flag LOW $vm.Name "Gen 2 VM has Secure Boot disabled." `
-                    -Why "Secure Boot blocks boot-level malware (rootkits/bootkits). Off, the VM will boot anything - including things you did not install." `
-                    -Fix "Enable it unless the guest OS genuinely requires it off (some older Linux distros; use the Microsoft UEFI CA template for Linux)."
-            }
-            [pscustomobject]@{ Host=$n; VM=$vm.Name; SecureBoot=$sec.SecureBootEnabled; vTPM=$sec.TpmEnabled }
+        $vms = if ($n -eq $env:COMPUTERNAME) {
+            Get-VM
         }
+        else {
+            Get-VM -ComputerName $n
+        }
+
+        $rows = foreach ($vm in ($vms | Where-Object Generation -eq 2)) {
+
+            # Get firmware configuration
+            $firmware = if ($n -eq $env:COMPUTERNAME) {
+                Get-VMFirmware -VMName $vm.Name
+            }
+            else {
+                Get-VMFirmware -ComputerName $n -VMName $vm.Name
+            }
+
+            # Get security configuration
+            $sec = $vm | Get-VMSecurity
+
+            # Get-VMFirmware reports SecureBoot as On / Off
+            $secureBoot = ($firmware.SecureBoot -eq 'On')
+
+            # Get-VMSecurity reports TPM state
+            $vTPM = [bool]$sec.TpmEnabled
+
+            if (-not $secureBoot) {
+                Add-Flag LOW $vm.Name "Gen 2 VM has Secure Boot disabled." `
+                    -Why "Secure Boot prevents unsigned or unauthorised boot components from loading before the operating system." `
+                    -Fix "Enable Secure Boot unless the guest OS genuinely requires it to remain disabled. For supported Linux guests, use the Microsoft UEFI Certificate Authority template."
+            }
+
+            [pscustomobject]@{
+                Host       = $n
+                VM         = $vm.Name
+                SecureBoot = $firmware.SecureBoot
+                vTPM       = $vTPM
+            }
+        }
+
         $rows | Format-Table -AutoSize | Out-Host
+
     } "VMSecurity($n)"
 }
 
@@ -851,7 +882,7 @@ $html = @"
  footer a{color:#3378ff}
 </style></head><body>
 <header>
- <h1><b>KYTHEL</b> &middot; Hyper-V Audit v2.0</h1>
+ <h1><b>BW</b> &middot; Hyper-V Audit v2.0</h1>
  <p>Host $(HtmlEnc $env:COMPUTERNAME) &middot; $(Get-Date -Format 'yyyy-MM-dd HH:mm') &middot; $clusterLine &middot; read-only audit, no changes made</p>
 </header>
 <main>
@@ -872,11 +903,7 @@ $html = @"
  <table><thead><tr><th>VM</th><th>Host</th><th>State</th><th>Gen</th><th>vCPU</th><th>Memory</th><th>Start/Stop action</th></tr></thead>
  <tbody>$rowsVms</tbody></table>
  <p style="font-size:13px">Total VHD provisioned: <b>$([math]::Round($vhdTotalsProv,0)) GB</b> &middot; actual on disk: <b>$([math]::Round($vhdTotalsAct,0)) GB</b></p>
- <footer>
-  Generated by <a href="https://github.com/kythel/hyperv-audit">KYTHEL Hyper-V Audit</a> -
-  free and open source, MIT license. Built by <a href="https://kythel.com">KYTHEL</a>,
-  managed IT services in Boynton Beach, FL. This audit is read-only: it reports, it never
-  changes your configuration. Full raw detail is in the accompanying transcript file.
+ <Full raw detail is in the accompanying transcript file.
  </footer>
 </main></body></html>
 "@
